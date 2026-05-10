@@ -1,0 +1,15 @@
+/README.md
+/CODEX_PROMPT.md
+/docs/
+
+node_modules/
+target/
+dist/
+*.tsbuildinfo
+
+.idea/
+.env
+uploads/
+
+.DS_Store
+._*
