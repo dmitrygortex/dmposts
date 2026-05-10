@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "test:approvals-layout": "node scripts/approvals-layout.test.mjs",
     "test:content-unit-tasks-layout": "node scripts/content-unit-tasks-layout.test.mjs",
+    "test:content-unit-executor-workflow": "node scripts/content-unit-executor-workflow.test.mjs",
     "test:table-actions-layout": "node scripts/table-actions-layout.test.mjs",
     "test:calendar": "node scripts/content-plan-calendar.test.mjs",
     "test:tasks-kanban": "node scripts/tasks-kanban.test.mjs",

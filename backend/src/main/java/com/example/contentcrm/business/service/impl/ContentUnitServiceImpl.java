@@ -1,9 +1,13 @@
 package com.example.contentcrm.business.service.impl;
 
 import com.example.contentcrm.business.exception.BusinessRuleViolationException;
+import com.example.contentcrm.business.exception.ForbiddenOperationException;
 import com.example.contentcrm.business.exception.ResourceNotFoundException;
 import com.example.contentcrm.business.model.enums.ContentType;
 import com.example.contentcrm.business.model.enums.ContentUnitStatus;
+import com.example.contentcrm.business.model.enums.Role;
+import com.example.contentcrm.business.model.enums.TaskStatus;
+import com.example.contentcrm.business.model.enums.TaskType;
 import com.example.contentcrm.business.service.ContentUnitService;
 import com.example.contentcrm.business.workflow.ContentUnitStatusWorkflow;
 import com.example.contentcrm.dataaccess.entity.ContentUnitEntity;
@@ -12,6 +16,7 @@ import com.example.contentcrm.dataaccess.repository.ContentUnitRepository;
 import com.example.contentcrm.dataaccess.repository.PublicationVariantRepository;
 import com.example.contentcrm.dataaccess.repository.TaskRepository;
 import com.example.contentcrm.dataaccess.repository.UserRepository;
+import com.example.contentcrm.presentation.dto.content.ContentUnitBaseTextRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitResponse;
 import com.example.contentcrm.presentation.dto.content.ContentUnitStatusRequest;
@@ -84,7 +89,9 @@ public class ContentUnitServiceImpl implements ContentUnitService {
     @Override
     @Transactional(readOnly = true)
     public ContentUnitResponse get(Long id) {
-        return toResponse(findContent(id));
+        ContentUnitEntity entity = findContent(id);
+        ensureCurrentUserCanRead(entity);
+        return toResponse(entity);
     }
 
     @Override
@@ -96,6 +103,18 @@ public class ContentUnitServiceImpl implements ContentUnitService {
         }
         validatePublishDate(request.plannedPublishAt());
         applyRequest(entity, request);
+        return toResponse(entity);
+    }
+
+    @Override
+    @Transactional
+    public ContentUnitResponse updateBaseText(Long id, ContentUnitBaseTextRequest request) {
+        ContentUnitEntity entity = findContent(id);
+        if (entity.getStatus() == ContentUnitStatus.PUBLISHED) {
+            throw new BusinessRuleViolationException("Published content cannot be edited");
+        }
+        ensureCurrentUserCanEditBaseText(entity);
+        entity.setBaseText(request.baseText());
         return toResponse(entity);
     }
 
@@ -153,6 +172,36 @@ public class ContentUnitServiceImpl implements ContentUnitService {
 
     private ContentUnitEntity findContent(Long id) {
         return contentUnitRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Content unit not found"));
+    }
+
+    private void ensureCurrentUserCanRead(ContentUnitEntity entity) {
+        currentUserProvider.currentUserId()
+                .flatMap(userRepository::findById)
+                .ifPresent(actor -> {
+                    if (actor.getRole() == Role.EXECUTOR
+                            && !taskRepository.existsByContentUnitIdAndAssigneeId(entity.getId(), actor.getId())) {
+                        throw new ForbiddenOperationException("Executor can access only content units with assigned tasks");
+                    }
+                });
+    }
+
+    private void ensureCurrentUserCanEditBaseText(ContentUnitEntity entity) {
+        UserEntity actor = currentUserProvider.requireCurrentUser();
+        if (actor.getRole() == Role.OWNER || actor.getRole() == Role.CONTENT_MANAGER) {
+            return;
+        }
+        if (actor.getRole() != Role.EXECUTOR) {
+            throw new ForbiddenOperationException("Only managers and assigned copywriters can edit base text");
+        }
+        boolean hasActiveCopywritingTask = taskRepository.existsByContentUnitIdAndAssigneeIdAndTypeAndStatusNotIn(
+                entity.getId(),
+                actor.getId(),
+                TaskType.COPYWRITING,
+                List.of(TaskStatus.DONE, TaskStatus.CANCELED)
+        );
+        if (!hasActiveCopywritingTask) {
+            throw new ForbiddenOperationException("Executor can edit base text only for own active copywriting task");
+        }
     }
 
     private ContentUnitResponse toResponse(ContentUnitEntity entity) {

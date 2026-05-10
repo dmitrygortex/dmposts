@@ -1,6 +1,7 @@
 package com.example.contentcrm.dataaccess.repository;
 
 import com.example.contentcrm.business.model.enums.TaskStatus;
+import com.example.contentcrm.business.model.enums.TaskType;
 import com.example.contentcrm.dataaccess.entity.TaskEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -17,6 +18,10 @@ public interface TaskRepository extends JpaRepository<TaskEntity, Long>, JpaSpec
     Optional<TaskEntity> findByIdAndAssigneeId(Long id, Long assigneeId);
 
     long countByContentUnitId(Long contentUnitId);
+
+    boolean existsByContentUnitIdAndAssigneeId(Long contentUnitId, Long assigneeId);
+
+    boolean existsByContentUnitIdAndAssigneeIdAndTypeAndStatusNotIn(Long contentUnitId, Long assigneeId, TaskType type, List<TaskStatus> statuses);
 
     long countByAssigneeIdAndStatus(Long assigneeId, TaskStatus status);
 

@@ -2,6 +2,7 @@ package com.example.contentcrm.business.service;
 
 import com.example.contentcrm.business.model.enums.ContentType;
 import com.example.contentcrm.business.model.enums.ContentUnitStatus;
+import com.example.contentcrm.presentation.dto.content.ContentUnitBaseTextRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitResponse;
 import com.example.contentcrm.presentation.dto.content.ContentUnitStatusRequest;
@@ -18,6 +19,8 @@ public interface ContentUnitService {
     ContentUnitResponse get(Long id);
 
     ContentUnitResponse update(Long id, ContentUnitRequest request);
+
+    ContentUnitResponse updateBaseText(Long id, ContentUnitBaseTextRequest request);
 
     ContentUnitResponse changeStatus(Long id, ContentUnitStatusRequest request);
 

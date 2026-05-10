@@ -46,6 +46,7 @@ export const contentApi = {
   get: (id: number) => apiClient.get<ContentUnit>(`/content-units/${id}`).then((r) => r.data),
   update: (id: number, payload: { title: string; description?: string; baseText?: string; contentType: ContentType; responsibleUserId?: number; plannedPublishAt?: string }) =>
     apiClient.patch<ContentUnit>(`/content-units/${id}`, payload).then((r) => r.data),
+  updateBaseText: (id: number, baseText: string) => apiClient.patch<ContentUnit>(`/content-units/${id}/base-text`, { baseText }).then((r) => r.data),
   changeStatus: (id: number, status: ContentUnitStatus) => apiClient.patch<ContentUnit>(`/content-units/${id}/status`, { status }).then((r) => r.data),
   remove: (id: number) => apiClient.delete(`/content-units/${id}`)
 };

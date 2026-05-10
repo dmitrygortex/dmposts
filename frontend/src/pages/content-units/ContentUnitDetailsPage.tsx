@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Copy, Download, ExternalLink, Play, RefreshCcw, Save, Send, Upload } from 'lucide-react';
+import { Download, ExternalLink, Play, RefreshCcw, Save, Send, Upload } from 'lucide-react';
 import { useAuth } from '../../app/providers/AuthProvider';
 import { approvalApi, contentApi, mediaApi, publicationApi, taskApi, userApi } from '../../services/api';
 import {
@@ -27,6 +27,7 @@ type Tab = 'overview' | 'tasks' | 'media' | 'approvals' | 'crossposting' | 'hist
 
 export function ContentUnitDetailsPage() {
   const { id } = useParams();
+  const { user } = useAuth();
   const contentId = Number(id);
   const [tab, setTab] = useState<Tab>('overview');
   const [content, setContent] = useState<ContentUnit | null>(null);
@@ -37,26 +38,71 @@ export function ContentUnitDetailsPage() {
   const [variants, setVariants] = useState<PublicationVariant[]>([]);
   const [attempts, setAttempts] = useState<PublicationAttempt[]>([]);
   const [error, setError] = useState('');
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
+  const isExecutor = user?.role === 'EXECUTOR';
+  const canManageContent = user?.role === 'OWNER' || user?.role === 'CONTENT_MANAGER';
+
+  const loadRequired = async () => {
+    const [contentData, tasksData, usersData] = await Promise.all([
+      contentApi.get(contentId),
+      taskApi.list({ contentUnitId: contentId, size: 100 }),
+      canManageContent ? userApi.list().catch(() => []) : Promise.resolve([])
+    ]);
+    setContent(contentData);
+    setTasks(tasksData.items);
+    setUsers(usersData);
+  };
+
+  const loadManagerSections = async () => {
+    if (!canManageContent) {
+      setMedia([]);
+      setApprovals([]);
+      setVariants([]);
+      setAttempts([]);
+      setSectionErrors({});
+      return;
+    }
+
+    const [mediaResult, approvalsResult, variantsResult, attemptsResult] = await Promise.allSettled([
+      mediaApi.list({ contentUnitId: contentId }),
+      approvalApi.list({ contentUnitId: contentId }),
+      publicationApi.list({ contentUnitId: contentId, size: 100 }),
+      publicationApi.attemptsByContent(contentId)
+    ]);
+    const nextErrors: Record<string, string> = {};
+
+    if (mediaResult.status === 'fulfilled') setMedia(mediaResult.value);
+    else {
+      setMedia([]);
+      nextErrors.media = mediaResult.reason instanceof Error ? mediaResult.reason.message : 'Медиа не загружены';
+    }
+
+    if (approvalsResult.status === 'fulfilled') setApprovals(approvalsResult.value);
+    else {
+      setApprovals([]);
+      nextErrors.approvals = approvalsResult.reason instanceof Error ? approvalsResult.reason.message : 'Согласования не загружены';
+    }
+
+    if (variantsResult.status === 'fulfilled') setVariants(variantsResult.value.items);
+    else {
+      setVariants([]);
+      nextErrors.crossposting = variantsResult.reason instanceof Error ? variantsResult.reason.message : 'Версии публикаций не загружены';
+    }
+
+    if (attemptsResult.status === 'fulfilled') setAttempts(attemptsResult.value);
+    else {
+      setAttempts([]);
+      nextErrors.history = attemptsResult.reason instanceof Error ? attemptsResult.reason.message : 'История публикаций не загружена';
+    }
+
+    setSectionErrors(nextErrors);
+  };
 
   const load = async () => {
     setError('');
     try {
-      const [contentData, usersData, tasksData, mediaData, approvalsData, variantsData, attemptsData] = await Promise.all([
-        contentApi.get(contentId),
-        userApi.list().catch(() => []),
-        taskApi.list({ contentUnitId: contentId, size: 100 }),
-        mediaApi.list({ contentUnitId: contentId }).catch(() => []),
-        approvalApi.list({ contentUnitId: contentId }),
-        publicationApi.list({ contentUnitId: contentId, size: 100 }),
-        publicationApi.attemptsByContent(contentId).catch(() => [])
-      ]);
-      setContent(contentData);
-      setUsers(usersData);
-      setTasks(tasksData.items);
-      setMedia(mediaData);
-      setApprovals(approvalsData);
-      setVariants(variantsData.items);
-      setAttempts(attemptsData);
+      await loadRequired();
+      await loadManagerSections();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Карточка не загружена');
     }
@@ -64,7 +110,7 @@ export function ContentUnitDetailsPage() {
 
   useEffect(() => {
     void load();
-  }, [contentId]);
+  }, [contentId, canManageContent]);
 
   const ownerOptions = users.filter((user) => user.role === 'OWNER');
   const executorOptions = users.filter((user) => user.role !== 'OWNER' || user.isActive);
@@ -72,14 +118,19 @@ export function ContentUnitDetailsPage() {
   if (error) return <ErrorState message={error} />;
   if (!content) return <LoadingState />;
 
-  const tabs: [Tab, string][] = [
-    ['overview', 'Overview'],
-    ['tasks', 'Tasks'],
-    ['media', 'Media'],
-    ['approvals', 'Approvals'],
-    ['crossposting', 'Crossposting'],
-    ['history', 'History']
-  ];
+  const tabs: [Tab, string][] = canManageContent
+    ? [
+        ['overview', 'Overview'],
+        ['tasks', 'Tasks'],
+        ['media', 'Media'],
+        ['approvals', 'Approvals'],
+        ['crossposting', 'Crossposting'],
+        ['history', 'History']
+      ]
+    : [
+        ['overview', 'Overview'],
+        ['tasks', isExecutor ? 'My tasks' : 'Tasks']
+      ];
 
   return (
     <>
@@ -93,17 +144,27 @@ export function ContentUnitDetailsPage() {
       <div className="tabs">
         {tabs.map(([key, label]) => <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>{label}</button>)}
       </div>
-      {tab === 'overview' && <OverviewTab content={content} users={users} onSaved={load} />}
-      {tab === 'tasks' && <TasksTab contentId={contentId} tasks={tasks} users={executorOptions} onChanged={load} />}
-      {tab === 'media' && <MediaTab contentId={contentId} media={media} tasks={tasks} onChanged={load} />}
-      {tab === 'approvals' && <ApprovalsTab contentId={contentId} approvals={approvals} reviewers={ownerOptions} onChanged={load} />}
-      {tab === 'crossposting' && <CrosspostingTab content={content} variants={variants} onChanged={load} />}
-      {tab === 'history' && <HistoryTab attempts={attempts} />}
+      {tab === 'overview' && <OverviewTab content={content} users={users} tasks={tasks} canManageContent={canManageContent} onSaved={load} />}
+      {tab === 'tasks' && <TasksTab contentId={contentId} tasks={tasks} users={executorOptions} canManageContent={canManageContent} canReviewTasks={canManageContent} onChanged={load} />}
+      {canManageContent && tab === 'media' && <><SectionError message={sectionErrors.media} /><MediaTab contentId={contentId} media={media} tasks={tasks} onChanged={load} /></>}
+      {canManageContent && tab === 'approvals' && <><SectionError message={sectionErrors.approvals} /><ApprovalsTab contentId={contentId} approvals={approvals} reviewers={ownerOptions} onChanged={load} /></>}
+      {canManageContent && tab === 'crossposting' && <><SectionError message={sectionErrors.crossposting} /><CrosspostingTab content={content} variants={variants} onChanged={load} /></>}
+      {canManageContent && tab === 'history' && <><SectionError message={sectionErrors.history} /><HistoryTab attempts={attempts} /></>}
     </>
   );
 }
 
-function OverviewTab({ content, users, onSaved }: { content: ContentUnit; users: User[]; onSaved: () => void }) {
+function SectionError({ message }: { message?: string }) {
+  return message ? <ErrorState message={message} /> : null;
+}
+
+function OverviewTab({ content, users, tasks, canManageContent, onSaved }: {
+  content: ContentUnit;
+  users: User[];
+  tasks: Task[];
+  canManageContent: boolean;
+  onSaved: () => void;
+}) {
   const [form, setForm] = useState({
     title: content.title,
     description: content.description ?? '',
@@ -129,6 +190,24 @@ function OverviewTab({ content, users, onSaved }: { content: ContentUnit; users:
     }
   };
 
+  if (!canManageContent) {
+    return (
+      <div className="grid two">
+        <section className="panel">
+          <h2>Материал</h2>
+          <div className="grid">
+            <Field label="Название"><input value={content.title} disabled /></Field>
+            <Field label="Тип"><input value={content.contentType} disabled /></Field>
+            <Field label="Описание"><textarea value={content.description ?? ''} disabled /></Field>
+            <Field label="Базовый текст"><textarea value={content.baseText ?? ''} disabled /></Field>
+            <div className="state">Создал: {content.createdBy?.fullName ?? '—'} · обновлено {formatDateTime(content.updatedAt)}</div>
+          </div>
+        </section>
+        <CopywritingWorkspace content={content} tasks={tasks} onChanged={onSaved} />
+      </div>
+    );
+  }
+
   return (
     <section className="panel">
       <form className="grid two" onSubmit={submit}>
@@ -150,7 +229,91 @@ function OverviewTab({ content, users, onSaved }: { content: ContentUnit; users:
   );
 }
 
-function TasksTab({ contentId, tasks, users, onChanged }: { contentId: number; tasks: Task[]; users: User[]; onChanged: () => void }) {
+function CopywritingWorkspace({ content, tasks, onChanged }: { content: ContentUnit; tasks: Task[]; onChanged: () => void }) {
+  const copywritingTask = tasks.find((task) => task.type === 'COPYWRITING' && task.status !== 'DONE' && task.status !== 'CANCELED');
+  const [baseText, setBaseText] = useState(content.baseText ?? '');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setBaseText(content.baseText ?? '');
+  }, [content.baseText]);
+
+  if (!copywritingTask) {
+    return (
+      <section className="panel">
+        <h2>Рабочий режим</h2>
+        <EmptyState title="Активной задачи COPYWRITING нет" />
+      </section>
+    );
+  }
+
+  const save = async () => {
+    setError('');
+    try {
+      await contentApi.updateBaseText(content.id, baseText);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Текст не сохранён');
+    }
+  };
+
+  const start = async () => {
+    setError('');
+    try {
+      await taskApi.changeStatus(copywritingTask.id, 'IN_PROGRESS', 'Взял в работу');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Статус не обновлён');
+    }
+  };
+
+  const submitForReview = async () => {
+    setError('');
+    try {
+      await contentApi.updateBaseText(content.id, baseText);
+      await taskApi.changeStatus(copywritingTask.id, 'ON_REVIEW', 'Текст подготовлен и отправлен на проверку');
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Текст не отправлен на проверку');
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="page-header">
+        <div>
+          <h2>Рабочий режим</h2>
+          <p>{copywritingTask.title}</p>
+        </div>
+        <Badge value={copywritingTask.status} />
+      </div>
+      <div className="grid">
+        <ErrorState message={error} />
+        <Field label="Текст поста">
+          <textarea value={baseText} disabled={copywritingTask.status !== 'IN_PROGRESS'} onChange={(e) => setBaseText(e.target.value)} />
+        </Field>
+        {copywritingTask.reviewComment && <div className="state">Комментарий ревью: {copywritingTask.reviewComment}</div>}
+        {copywritingTask.status === 'TODO' && <button className="primary" type="button" onClick={start}>В работу</button>}
+        {copywritingTask.status === 'IN_PROGRESS' && (
+          <div className="actions">
+            <button type="button" onClick={save}><Save size={16} />Сохранить текст</button>
+            <button className="primary" type="button" onClick={submitForReview}><Send size={16} />Отправить на ревью</button>
+          </div>
+        )}
+        {copywritingTask.status === 'ON_REVIEW' && <div className="state">Текст отправлен на проверку.</div>}
+      </div>
+    </section>
+  );
+}
+
+function TasksTab({ contentId, tasks, users, canManageContent, canReviewTasks, onChanged }: {
+  contentId: number;
+  tasks: Task[];
+  users: User[];
+  canManageContent: boolean;
+  canReviewTasks: boolean;
+  onChanged: () => void;
+}) {
   const [form, setForm] = useState({ title: 'Подготовить баннер для акции', description: 'Сделать изображение для VK и Telegram', type: 'DESIGN' as TaskType, priority: 'HIGH' as TaskPriority, assigneeId: '', deadline: '' });
   const [error, setError] = useState('');
 
@@ -170,31 +333,41 @@ function TasksTab({ contentId, tasks, users, onChanged }: { contentId: number; t
 
   return (
     <>
-      <section className="panel">
-        <h2>Новая задача</h2>
-        <form className="grid three" onSubmit={create}>
-          <ErrorState message={error} />
-          <Field label="Название"><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-          <Field label="Тип"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as TaskType })}>{taskTypes.map((type) => <option key={type}>{type}</option>)}</select></Field>
-          <Field label="Приоритет"><select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as TaskPriority })}>{taskPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></Field>
-          <Field label="Исполнитель"><select value={form.assigneeId} onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}><option value="">Выберите</option>{users.map((user) => <option key={user.id} value={user.id}>{user.fullName} ({user.role})</option>)}</select></Field>
-          <Field label="Deadline"><input type="datetime-local" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} /></Field>
-          <Field label="Описание"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
-          <button className="primary" type="submit">Создать задачу</button>
-        </form>
-      </section>
+      {canManageContent && (
+        <section className="panel">
+          <h2>Новая задача</h2>
+          <form className="grid three" onSubmit={create}>
+            <ErrorState message={error} />
+            <Field label="Название"><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+            <Field label="Тип"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as TaskType })}>{taskTypes.map((type) => <option key={type}>{type}</option>)}</select></Field>
+            <Field label="Приоритет"><select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as TaskPriority })}>{taskPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></Field>
+            <Field label="Исполнитель"><select value={form.assigneeId} onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}><option value="">Выберите</option>{users.map((user) => <option key={user.id} value={user.id}>{user.fullName} ({user.role})</option>)}</select></Field>
+            <Field label="Deadline"><input type="datetime-local" value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} /></Field>
+            <Field label="Описание"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            <button className="primary" type="submit">Создать задачу</button>
+          </form>
+        </section>
+      )}
       <section className="panel table-wrap">
         <table className="content-unit-tasks-table">
           <thead><tr><th>Задача</th><th>Статус</th><th>Приоритет</th><th>Исполнитель</th><th>Deadline</th><th>Действия</th></tr></thead>
-          <tbody>{tasks.map((task) => <TaskRow key={task.id} task={task} onChanged={onChanged} />)}</tbody>
+          <tbody>{tasks.map((task) => <TaskRow key={task.id} task={task} canReviewTasks={canReviewTasks} onChanged={onChanged} />)}</tbody>
         </table>
       </section>
     </>
   );
 }
 
-function TaskRow({ task, onChanged }: { task: Task; onChanged: () => void }) {
-  const nextStatuses: TaskStatus[] = task.status === 'TODO' ? ['IN_PROGRESS'] : task.status === 'IN_PROGRESS' ? ['ON_REVIEW', 'CANCELED'] : task.status === 'ON_REVIEW' ? ['DONE', 'IN_PROGRESS'] : [];
+function TaskRow({ task, canReviewTasks, onChanged }: { task: Task; canReviewTasks: boolean; onChanged: () => void }) {
+  const [reviewComment, setReviewComment] = useState('Нужно доработать.');
+  const nextStatuses: TaskStatus[] = getAvailableTaskTransitions(task, canReviewTasks);
+  const commentFor = (status: TaskStatus) => {
+    if (status === 'ON_REVIEW') return task.type === 'COPYWRITING' ? 'Текст подготовлен и отправлен на проверку' : 'Готово, файл прикреплён.';
+    if (status === 'DONE') return 'Задача принята.';
+    if (status === 'IN_PROGRESS' && task.status === 'ON_REVIEW') return reviewComment;
+    if (status === 'CANCELED') return 'Задача отменена.';
+    return 'Статус обновлён.';
+  };
   return (
     <tr>
       <td><strong>{task.title}</strong><br /><small>{task.description}</small></td>
@@ -207,14 +380,33 @@ function TaskRow({ task, onChanged }: { task: Task; onChanged: () => void }) {
           {nextStatuses.length === 0 ? (
             <span className="content-unit-task-actions-placeholder">—</span>
           ) : nextStatuses.map((status) => (
-            <button key={status} onClick={() => taskApi.changeStatus(task.id, status, status === 'ON_REVIEW' ? 'Готово, файл прикреплён.' : 'Обновлено').then(onChanged)}>
-              {status}
+            <button key={status} onClick={() => taskApi.changeStatus(task.id, status, commentFor(status)).then(onChanged)}>
+              {getTaskTransitionLabel(task, status)}
             </button>
           ))}
         </div>
+        {canReviewTasks && task.status === 'ON_REVIEW' && (
+          <input value={reviewComment} onChange={(event) => setReviewComment(event.target.value)} aria-label="Комментарий ревью" />
+        )}
       </td>
     </tr>
   );
+}
+
+function getAvailableTaskTransitions(task: Task, canReviewTasks: boolean): TaskStatus[] {
+  if (task.status === 'TODO') return canReviewTasks ? ['IN_PROGRESS', 'CANCELED'] : ['IN_PROGRESS'];
+  if (task.status === 'IN_PROGRESS') return canReviewTasks ? ['ON_REVIEW', 'CANCELED'] : ['ON_REVIEW'];
+  if (task.status === 'ON_REVIEW' && canReviewTasks) return ['DONE', 'IN_PROGRESS'];
+  return [];
+}
+
+function getTaskTransitionLabel(task: Task, status: TaskStatus) {
+  if (status === 'IN_PROGRESS' && task.status === 'ON_REVIEW') return 'Вернуть';
+  if (status === 'IN_PROGRESS') return 'В работу';
+  if (status === 'ON_REVIEW') return 'На ревью';
+  if (status === 'DONE') return 'Принять';
+  if (status === 'CANCELED') return 'Отменить';
+  return status;
 }
 
 function MediaTab({ contentId, media, tasks, onChanged }: { contentId: number; media: MediaFile[]; tasks: Task[]; onChanged: () => void }) {

@@ -4,6 +4,7 @@ import com.example.contentcrm.business.model.enums.ContentType;
 import com.example.contentcrm.business.model.enums.ContentUnitStatus;
 import com.example.contentcrm.business.service.ContentUnitService;
 import com.example.contentcrm.presentation.dto.common.PageResponse;
+import com.example.contentcrm.presentation.dto.content.ContentUnitBaseTextRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitResponse;
 import com.example.contentcrm.presentation.dto.content.ContentUnitStatusRequest;
@@ -54,6 +55,12 @@ public class ContentUnitController {
     @PreAuthorize("hasAnyRole('OWNER','CONTENT_MANAGER')")
     public ContentUnitResponse update(@PathVariable Long id, @Valid @RequestBody ContentUnitRequest request) {
         return contentUnitService.update(id, request);
+    }
+
+    @PatchMapping("/{id}/base-text")
+    @PreAuthorize("hasAnyRole('OWNER','CONTENT_MANAGER','EXECUTOR')")
+    public ContentUnitResponse updateBaseText(@PathVariable Long id, @RequestBody ContentUnitBaseTextRequest request) {
+        return contentUnitService.updateBaseText(id, request);
     }
 
     @PatchMapping("/{id}/status")

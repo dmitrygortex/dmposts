@@ -21,10 +21,14 @@ import com.example.contentcrm.dataaccess.integration.PublishRequest;
 import com.example.contentcrm.dataaccess.integration.PublishResult;
 import com.example.contentcrm.dataaccess.entity.PublicationVariantEntity;
 import com.example.contentcrm.dataaccess.repository.PublicationVariantRepository;
+import com.example.contentcrm.dataaccess.repository.UserRepository;
+import com.example.contentcrm.security.SecurityUser;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.contentcrm.presentation.dto.approval.ApprovalDecisionRequest;
 import com.example.contentcrm.presentation.dto.approval.ApprovalResponse;
 import com.example.contentcrm.presentation.dto.approval.ApprovalSubmitRequest;
 import com.example.contentcrm.presentation.dto.auth.AuthResponse;
+import com.example.contentcrm.presentation.dto.auth.AuthUserResponse;
 import com.example.contentcrm.presentation.dto.auth.RegisterRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitResponse;
@@ -43,12 +47,14 @@ import com.example.contentcrm.presentation.dto.user.UserResponse;
 import com.example.contentcrm.business.exception.BusinessRuleViolationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestExecutionListeners;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
@@ -60,6 +66,7 @@ import org.springframework.test.context.support.DirtiesContextBeforeModesTestExe
 import org.springframework.test.context.support.DirtiesContextTestExecutionListener;
 import org.springframework.test.context.transaction.TransactionalTestExecutionListener;
 import org.springframework.test.context.web.ServletTestExecutionListener;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -68,6 +75,11 @@ import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:contentcrm;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
@@ -82,6 +94,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 @Import(MvpBusinessFlowTest.MastodonPublisherTestConfig.class)
+@AutoConfigureMockMvc
 @TestExecutionListeners(
         listeners = {
                 ServletTestExecutionListener.class,
@@ -120,6 +133,15 @@ class MvpBusinessFlowTest {
 
     @Autowired
     PublicationVariantRepository publicationVariantRepository;
+
+    @Autowired
+    UserRepository userRepository;
+
+    @Autowired
+    MockMvc mockMvc;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @Autowired
     FakeMastodonPublisher mastodonPublisher;
@@ -166,6 +188,117 @@ class MvpBusinessFlowTest {
         assertThatThrownBy(() -> taskService.getForCurrentUser(task.id(), executorTwo.id()))
                 .isInstanceOf(BusinessRuleViolationException.class)
                 .hasMessageContaining("own tasks");
+    }
+
+    @Test
+    void executorCanOpenContentUnitForAssignedTask() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        UserResponse executor = createUser("executor@example.com", "Исполнитель", Role.EXECUTOR);
+        ContentUnitResponse content = createDraftContent(manager.id());
+        taskService.create(new TaskRequest(
+                content.id(),
+                "Написать текст",
+                "Подготовить пост",
+                TaskType.COPYWRITING,
+                TaskPriority.MEDIUM,
+                executor.id(),
+                LocalDateTime.now().plusDays(1)
+        ));
+
+        mockMvc.perform(get("/api/content-units/{id}", content.id()).with(user(securityUser(executor))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(content.id()))
+                .andExpect(jsonPath("$.baseText").value("Базовый текст"));
+    }
+
+    @Test
+    void executorCannotOpenForeignContentUnit() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        UserResponse executor = createUser("executor@example.com", "Исполнитель", Role.EXECUTOR);
+        ContentUnitResponse content = createDraftContent(manager.id());
+
+        mockMvc.perform(get("/api/content-units/{id}", content.id()).with(user(securityUser(executor))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void executorWithCopywritingTaskCanPatchOnlyBaseText() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        UserResponse executor = createUser("executor@example.com", "Исполнитель", Role.EXECUTOR);
+        ContentUnitResponse content = createDraftContent(manager.id());
+        TaskResponse task = taskService.create(new TaskRequest(
+                content.id(),
+                "Написать текст",
+                "Подготовить пост",
+                TaskType.COPYWRITING,
+                TaskPriority.MEDIUM,
+                executor.id(),
+                LocalDateTime.now().plusDays(1)
+        ));
+        taskService.changeStatus(task.id(), new TaskStatusRequest(TaskStatus.IN_PROGRESS, "В работе"), executor.id());
+
+        mockMvc.perform(patch("/api/content-units/{id}/base-text", content.id())
+                        .with(user(securityUser(executor)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new BaseTextPayload("Обновленный текст", "Нельзя менять title"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Пост про акцию"))
+                .andExpect(jsonPath("$.baseText").value("Обновленный текст"));
+    }
+
+    @Test
+    void executorWithoutCopywritingTaskCannotPatchBaseText() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        UserResponse executor = createUser("executor@example.com", "Исполнитель", Role.EXECUTOR);
+        ContentUnitResponse content = createDraftContent(manager.id());
+        TaskResponse task = taskService.create(new TaskRequest(
+                content.id(),
+                "Сделать дизайн",
+                "Подготовить изображение",
+                TaskType.DESIGN,
+                TaskPriority.MEDIUM,
+                executor.id(),
+                LocalDateTime.now().plusDays(1)
+        ));
+        taskService.changeStatus(task.id(), new TaskStatusRequest(TaskStatus.IN_PROGRESS, "В работе"), executor.id());
+
+        mockMvc.perform(patch("/api/content-units/{id}/base-text", content.id())
+                        .with(user(securityUser(executor)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new BaseTextPayload("Обновленный текст", null))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void managerCanPatchBaseText() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        ContentUnitResponse content = createDraftContent(manager.id());
+
+        mockMvc.perform(patch("/api/content-units/{id}/base-text", content.id())
+                        .with(user(securityUser(manager)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new BaseTextPayload("Текст менеджера", null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.baseText").value("Текст менеджера"));
+    }
+
+    @Test
+    void ownerCanPatchBaseText() throws Exception {
+        AuthResponse owner = authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        ContentUnitResponse content = createDraftContent(manager.id());
+
+        mockMvc.perform(patch("/api/content-units/{id}/base-text", content.id())
+                        .with(user(securityUser(owner.user())))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new BaseTextPayload("Текст владельца", null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.baseText").value("Текст владельца"));
     }
 
     @Test
@@ -611,6 +744,20 @@ class MvpBusinessFlowTest {
         return userService.create(new CreateUserRequest(email, "password123", name, role));
     }
 
+    private SecurityUser securityUser(UserResponse user) {
+        return securityUser(user.id());
+    }
+
+    private SecurityUser securityUser(AuthUserResponse user) {
+        return securityUser(user.id());
+    }
+
+    private SecurityUser securityUser(Long userId) {
+        return userRepository.findById(userId)
+                .map(SecurityUser::new)
+                .orElseThrow();
+    }
+
     private ContentUnitResponse createDraftContent(Long managerId) {
         return contentUnitService.create(new ContentUnitRequest(
                 "Пост про акцию",
@@ -675,5 +822,8 @@ class MvpBusinessFlowTest {
         void setNextResult(PublishResult nextResult) {
             this.nextResult = nextResult;
         }
+    }
+
+    record BaseTextPayload(String baseText, String title) {
     }
 }
