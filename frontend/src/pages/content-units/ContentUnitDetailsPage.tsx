@@ -184,7 +184,7 @@ function TasksTab({ contentId, tasks, users, onChanged }: { contentId: number; t
         </form>
       </section>
       <section className="panel table-wrap">
-        <table>
+        <table className="content-unit-tasks-table">
           <thead><tr><th>Задача</th><th>Статус</th><th>Приоритет</th><th>Исполнитель</th><th>Deadline</th><th>Действия</th></tr></thead>
           <tbody>{tasks.map((task) => <TaskRow key={task.id} task={task} onChanged={onChanged} />)}</tbody>
         </table>
@@ -202,12 +202,16 @@ function TaskRow({ task, onChanged }: { task: Task; onChanged: () => void }) {
       <td><Badge value={task.priority} /></td>
       <td>{task.assignee.fullName}</td>
       <td>{formatDateTime(task.deadline)}</td>
-      <td className="actions">
-        {nextStatuses.map((status) => (
-          <button key={status} onClick={() => taskApi.changeStatus(task.id, status, status === 'ON_REVIEW' ? 'Готово, файл прикреплён.' : 'Обновлено').then(onChanged)}>
-            {status}
-          </button>
-        ))}
+      <td className="content-unit-task-actions-cell">
+        <div className="actions content-unit-task-actions">
+          {nextStatuses.length === 0 ? (
+            <span className="content-unit-task-actions-placeholder">—</span>
+          ) : nextStatuses.map((status) => (
+            <button key={status} onClick={() => taskApi.changeStatus(task.id, status, status === 'ON_REVIEW' ? 'Готово, файл прикреплён.' : 'Обновлено').then(onChanged)}>
+              {status}
+            </button>
+          ))}
+        </div>
       </td>
     </tr>
   );
@@ -285,9 +289,17 @@ function ApprovalsTab({ contentId, approvals, reviewers, onChanged }: { contentI
               <td>{approval.reviewer.fullName}</td>
               <td><Badge value={approval.status} /></td>
               <td>{approval.comment}</td>
-              <td className="actions">
-                {approval.status === 'PENDING' && canDecideApproval && <button onClick={() => approvalApi.approve(approval.id, 'Согласовано').then(onChanged)}>Approve</button>}
-                {approval.status === 'PENDING' && canDecideApproval && <button className="danger" onClick={() => approvalApi.reject(approval.id, rejectComment).then(onChanged)}>Reject</button>}
+              <td className="table-actions-cell">
+                <div className="actions table-actions">
+                  {approval.status === 'PENDING' && canDecideApproval ? (
+                    <>
+                      <button onClick={() => approvalApi.approve(approval.id, 'Согласовано').then(onChanged)}>Approve</button>
+                      <button className="danger" onClick={() => approvalApi.reject(approval.id, rejectComment).then(onChanged)}>Reject</button>
+                    </>
+                  ) : (
+                    <span className="table-actions-placeholder">—</span>
+                  )}
+                </div>
               </td>
             </tr>
           ))}</tbody>

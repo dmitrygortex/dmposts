@@ -64,13 +64,15 @@ export function UsersPage() {
                   <td>{user.fullName}</td>
                   <td><Badge value={user.role} /></td>
                   <td>{user.isActive ? 'Активен' : 'Отключён'}</td>
-                  <td className="actions">
-                    <select value={user.role} onChange={(e) => userApi.updateRole(user.id, e.target.value as Role).then(load).catch((err) => setError(err.message))}>
-                      {roles.map((role) => <option key={role}>{role}</option>)}
-                    </select>
-                    {user.isActive
-                      ? <button className="danger" onClick={() => userApi.deactivate(user.id).then(load).catch((err) => setError(err.message))}>Отключить</button>
-                      : <button onClick={() => userApi.activate(user.id).then(load).catch((err) => setError(err.message))}>Активировать</button>}
+                  <td className="table-actions-cell">
+                    <div className="actions table-actions">
+                      <select value={user.role} onChange={(e) => userApi.updateRole(user.id, e.target.value as Role).then(load).catch((err) => setError(err.message))}>
+                        {roles.map((role) => <option key={role}>{role}</option>)}
+                      </select>
+                      {user.isActive
+                        ? <button className="danger" onClick={() => userApi.deactivate(user.id).then(load).catch((err) => setError(err.message))}>Отключить</button>
+                        : <button onClick={() => userApi.activate(user.id).then(load).catch((err) => setError(err.message))}>Активировать</button>}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -113,6 +113,31 @@ th { color: var(--text-muted); font-weight: 700; font-size: 13px; }
   min-height: 38px;
   align-content: center;
 }
+.table-actions-cell {
+  min-width: 172px;
+  vertical-align: middle;
+}
+.table-actions {
+  min-height: 38px;
+  align-content: center;
+}
+.table-actions-placeholder {
+  color: var(--text-muted);
+}
+.content-unit-tasks-table th,
+.content-unit-tasks-table td {
+  vertical-align: middle;
+}
+.content-unit-task-actions-cell {
+  min-width: 172px;
+}
+.content-unit-task-actions {
+  min-height: 38px;
+  align-content: center;
+}
+.content-unit-task-actions-placeholder {
+  color: var(--text-muted);
+}
 
 .field { display: grid; gap: 6px; color: #334155; font-weight: 650; }
 .field input, .field textarea, .field select {

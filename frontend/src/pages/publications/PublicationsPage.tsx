@@ -64,30 +64,32 @@ export function PublicationsPage() {
                 <td><Badge value={variant.status} /></td>
                 <td>{formatDateTime(variant.scheduledAt)}</td>
                 <td>{variant.errorMessage ?? '—'}</td>
-                <td className="actions">
-                  {publishableStatuses.includes(variant.status) && (
-                    <button onClick={() => publicationApi.publishNow(variant.id).then(load).catch((e) => setError(e.message))}><Play size={16} />Publish</button>
-                  )}
-                  {variant.status === 'MANUAL_REQUIRED' && <button onClick={() => publicationApi.retry(variant.id).then(load).catch((e) => setError(e.message))}><RefreshCcw size={16} />Retry</button>}
-                  {variant.status === 'MANUAL_REQUIRED' && <Link className="button" to={`/manual-publication/${variant.id}`}>Manual</Link>}
-                  {finalStatuses.includes(variant.status) && variant.externalPostUrl && (
-                    <a className="button" href={variant.externalPostUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />Открыть публикацию</a>
-                  )}
-                  {finalStatuses.includes(variant.status) && !variant.externalPostUrl && (
-                    <form className="inline-link-form" onSubmit={(event) => saveExternalPostUrl(event, variant)}>
-                      <input
-                        value={linkDrafts[variant.id] ?? ''}
-                        onChange={(event) => setLinkDrafts((current) => ({ ...current, [variant.id]: event.target.value }))}
-                        placeholder="https://vk.com/wall-123_456"
-                        aria-label={`External post URL for ${variant.platform}`}
-                        required
-                      />
-                      <button type="submit" disabled={savingLinkId === variant.id}>
-                        <Save size={16} />{savingLinkId === variant.id ? 'Saving...' : 'Save link'}
-                      </button>
-                    </form>
-                  )}
-                  {!publishableStatuses.includes(variant.status) && variant.status !== 'MANUAL_REQUIRED' && !finalStatuses.includes(variant.status) && '—'}
+                <td className="table-actions-cell">
+                  <div className="actions table-actions">
+                    {publishableStatuses.includes(variant.status) && (
+                      <button onClick={() => publicationApi.publishNow(variant.id).then(load).catch((e) => setError(e.message))}><Play size={16} />Publish</button>
+                    )}
+                    {variant.status === 'MANUAL_REQUIRED' && <button onClick={() => publicationApi.retry(variant.id).then(load).catch((e) => setError(e.message))}><RefreshCcw size={16} />Retry</button>}
+                    {variant.status === 'MANUAL_REQUIRED' && <Link className="button" to={`/manual-publication/${variant.id}`}>Manual</Link>}
+                    {finalStatuses.includes(variant.status) && variant.externalPostUrl && (
+                      <a className="button" href={variant.externalPostUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />Открыть публикацию</a>
+                    )}
+                    {finalStatuses.includes(variant.status) && !variant.externalPostUrl && (
+                      <form className="inline-link-form" onSubmit={(event) => saveExternalPostUrl(event, variant)}>
+                        <input
+                          value={linkDrafts[variant.id] ?? ''}
+                          onChange={(event) => setLinkDrafts((current) => ({ ...current, [variant.id]: event.target.value }))}
+                          placeholder="https://vk.com/wall-123_456"
+                          aria-label={`External post URL for ${variant.platform}`}
+                          required
+                        />
+                        <button type="submit" disabled={savingLinkId === variant.id}>
+                          <Save size={16} />{savingLinkId === variant.id ? 'Saving...' : 'Save link'}
+                        </button>
+                      </form>
+                    )}
+                    {!publishableStatuses.includes(variant.status) && variant.status !== 'MANUAL_REQUIRED' && !finalStatuses.includes(variant.status) && <span className="table-actions-placeholder">—</span>}
+                  </div>
                 </td>
               </tr>
             ))}</tbody>
