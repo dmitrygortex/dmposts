@@ -12,11 +12,15 @@ assert.match(pageSource, /contentApi\.updateBaseText\(content\.id, baseText\)/);
 assert.match(pageSource, /Текст подготовлен и отправлен на проверку/);
 
 const loadRequiredStart = pageSource.indexOf('const loadRequired = async () =>');
-const loadManagerStart = pageSource.indexOf('const loadManagerSections = async () =>');
+const loadManagerStart = pageSource.indexOf('const loadManagerSections = async');
 assert.notEqual(loadRequiredStart, -1);
 assert.notEqual(loadManagerStart, -1);
 const requiredLoadSource = pageSource.slice(loadRequiredStart, loadManagerStart);
 
+assert.match(requiredLoadSource, /const contentData = await contentApi\.get\(contentId\)/);
+assert.doesNotMatch(requiredLoadSource, /Promise\.all\(\[/);
+assert.match(requiredLoadSource, /taskApi\.list\(\{ contentUnitId: contentId, size: 100 \}\)/);
+assert.match(requiredLoadSource, /tasksResult\.status === 'fulfilled'/);
 assert.doesNotMatch(requiredLoadSource, /approvalApi\.list/);
 assert.doesNotMatch(requiredLoadSource, /publicationApi\.list/);
 assert.doesNotMatch(requiredLoadSource, /attemptsByContent/);

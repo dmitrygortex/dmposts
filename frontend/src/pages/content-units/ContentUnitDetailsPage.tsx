@@ -43,23 +43,37 @@ export function ContentUnitDetailsPage() {
   const canManageContent = user?.role === 'OWNER' || user?.role === 'CONTENT_MANAGER';
 
   const loadRequired = async () => {
-    const [contentData, tasksData, usersData] = await Promise.all([
-      contentApi.get(contentId),
-      taskApi.list({ contentUnitId: contentId, size: 100 }),
-      canManageContent ? userApi.list().catch(() => []) : Promise.resolve([])
-    ]);
+    const contentData = await contentApi.get(contentId);
     setContent(contentData);
-    setTasks(tasksData.items);
-    setUsers(usersData);
+
+    const [tasksResult, usersResult] = await Promise.allSettled([
+      taskApi.list({ contentUnitId: contentId, size: 100 }),
+      canManageContent ? userApi.list() : Promise.resolve([])
+    ]);
+    const nextErrors: Record<string, string> = {};
+
+    if (tasksResult.status === 'fulfilled') setTasks(tasksResult.value.items);
+    else {
+      setTasks([]);
+      nextErrors.tasks = toSectionError(tasksResult.reason, 'Задачи не загружены');
+    }
+
+    if (usersResult.status === 'fulfilled') setUsers(usersResult.value);
+    else {
+      setUsers([]);
+      nextErrors.users = toSectionError(usersResult.reason, 'Пользователи не загружены');
+    }
+
+    return nextErrors;
   };
 
-  const loadManagerSections = async () => {
+  const loadManagerSections = async (baseErrors: Record<string, string>) => {
     if (!canManageContent) {
       setMedia([]);
       setApprovals([]);
       setVariants([]);
       setAttempts([]);
-      setSectionErrors({});
+      setSectionErrors(baseErrors);
       return;
     }
 
@@ -74,35 +88,36 @@ export function ContentUnitDetailsPage() {
     if (mediaResult.status === 'fulfilled') setMedia(mediaResult.value);
     else {
       setMedia([]);
-      nextErrors.media = mediaResult.reason instanceof Error ? mediaResult.reason.message : 'Медиа не загружены';
+      nextErrors.media = toSectionError(mediaResult.reason, 'Медиа не загружены');
     }
 
     if (approvalsResult.status === 'fulfilled') setApprovals(approvalsResult.value);
     else {
       setApprovals([]);
-      nextErrors.approvals = approvalsResult.reason instanceof Error ? approvalsResult.reason.message : 'Согласования не загружены';
+      nextErrors.approvals = toSectionError(approvalsResult.reason, 'Согласования не загружены');
     }
 
     if (variantsResult.status === 'fulfilled') setVariants(variantsResult.value.items);
     else {
       setVariants([]);
-      nextErrors.crossposting = variantsResult.reason instanceof Error ? variantsResult.reason.message : 'Версии публикаций не загружены';
+      nextErrors.crossposting = toSectionError(variantsResult.reason, 'Версии публикаций не загружены');
     }
 
     if (attemptsResult.status === 'fulfilled') setAttempts(attemptsResult.value);
     else {
       setAttempts([]);
-      nextErrors.history = attemptsResult.reason instanceof Error ? attemptsResult.reason.message : 'История публикаций не загружена';
+      nextErrors.history = toSectionError(attemptsResult.reason, 'История публикаций не загружена');
     }
 
-    setSectionErrors(nextErrors);
+    setSectionErrors({ ...baseErrors, ...nextErrors });
   };
 
   const load = async () => {
     setError('');
+    setSectionErrors({});
     try {
-      await loadRequired();
-      await loadManagerSections();
+      const requiredErrors = await loadRequired();
+      await loadManagerSections(requiredErrors);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Карточка не загружена');
     }
@@ -144,8 +159,8 @@ export function ContentUnitDetailsPage() {
       <div className="tabs">
         {tabs.map(([key, label]) => <button key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>{label}</button>)}
       </div>
-      {tab === 'overview' && <OverviewTab content={content} users={users} tasks={tasks} canManageContent={canManageContent} onSaved={load} />}
-      {tab === 'tasks' && <TasksTab contentId={contentId} tasks={tasks} users={executorOptions} canManageContent={canManageContent} canReviewTasks={canManageContent} onChanged={load} />}
+      {tab === 'overview' && <OverviewTab content={content} users={users} tasks={tasks} tasksError={sectionErrors.tasks} canManageContent={canManageContent} onSaved={load} />}
+      {tab === 'tasks' && <><SectionError message={sectionErrors.tasks} /><TasksTab contentId={contentId} tasks={tasks} users={executorOptions} canManageContent={canManageContent} canReviewTasks={canManageContent} onChanged={load} /></>}
       {canManageContent && tab === 'media' && <><SectionError message={sectionErrors.media} /><MediaTab contentId={contentId} media={media} tasks={tasks} onChanged={load} /></>}
       {canManageContent && tab === 'approvals' && <><SectionError message={sectionErrors.approvals} /><ApprovalsTab contentId={contentId} approvals={approvals} reviewers={ownerOptions} onChanged={load} /></>}
       {canManageContent && tab === 'crossposting' && <><SectionError message={sectionErrors.crossposting} /><CrosspostingTab content={content} variants={variants} onChanged={load} /></>}
@@ -158,10 +173,15 @@ function SectionError({ message }: { message?: string }) {
   return message ? <ErrorState message={message} /> : null;
 }
 
-function OverviewTab({ content, users, tasks, canManageContent, onSaved }: {
+function toSectionError(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
+function OverviewTab({ content, users, tasks, tasksError, canManageContent, onSaved }: {
   content: ContentUnit;
   users: User[];
   tasks: Task[];
+  tasksError?: string;
   canManageContent: boolean;
   onSaved: () => void;
 }) {
@@ -203,7 +223,7 @@ function OverviewTab({ content, users, tasks, canManageContent, onSaved }: {
             <div className="state">Создал: {content.createdBy?.fullName ?? '—'} · обновлено {formatDateTime(content.updatedAt)}</div>
           </div>
         </section>
-        <CopywritingWorkspace content={content} tasks={tasks} onChanged={onSaved} />
+        {tasksError ? <WorkspaceError message={tasksError} /> : <CopywritingWorkspace content={content} tasks={tasks} onChanged={onSaved} />}
       </div>
     );
   }
@@ -225,6 +245,15 @@ function OverviewTab({ content, users, tasks, canManageContent, onSaved }: {
         <Field label="Базовый текст"><textarea value={form.baseText} onChange={(e) => setForm({ ...form, baseText: e.target.value })} /></Field>
         <button className="primary" type="submit"><Save size={16} />Сохранить</button>
       </form>
+    </section>
+  );
+}
+
+function WorkspaceError({ message }: { message: string }) {
+  return (
+    <section className="panel">
+      <h2>Рабочий режим</h2>
+      <ErrorState message={message} />
     </section>
   );
 }

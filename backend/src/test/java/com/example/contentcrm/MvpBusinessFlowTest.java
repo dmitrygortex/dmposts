@@ -29,6 +29,7 @@ import com.example.contentcrm.presentation.dto.approval.ApprovalResponse;
 import com.example.contentcrm.presentation.dto.approval.ApprovalSubmitRequest;
 import com.example.contentcrm.presentation.dto.auth.AuthResponse;
 import com.example.contentcrm.presentation.dto.auth.AuthUserResponse;
+import com.example.contentcrm.presentation.dto.auth.LoginRequest;
 import com.example.contentcrm.presentation.dto.auth.RegisterRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitRequest;
 import com.example.contentcrm.presentation.dto.content.ContentUnitResponse;
@@ -210,6 +211,38 @@ class MvpBusinessFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(content.id()))
                 .andExpect(jsonPath("$.baseText").value("Базовый текст"));
+    }
+
+    @Test
+    void executorJwtCanOpenAssignedContentUnitAndListOwnTasksForIt() throws Exception {
+        authService.register(new RegisterRequest("owner@example.com", "password123", "Иван Владелец"));
+        UserResponse manager = createUser("manager@example.com", "Контент Менеджер", Role.CONTENT_MANAGER);
+        UserResponse executor = createUser("executor@example.com", "Исполнитель", Role.EXECUTOR);
+        ContentUnitResponse content = createDraftContent(manager.id());
+        TaskResponse task = taskService.create(new TaskRequest(
+                content.id(),
+                "Написать текст",
+                "Подготовить пост",
+                TaskType.COPYWRITING,
+                TaskPriority.MEDIUM,
+                executor.id(),
+                LocalDateTime.now().plusDays(1)
+        ));
+        AuthResponse executorSession = authService.login(new LoginRequest("executor@example.com", "password123"));
+        String authHeader = "Bearer " + executorSession.accessToken();
+
+        mockMvc.perform(get("/api/content-units/{id}", content.id()).header("Authorization", authHeader))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(content.id()))
+                .andExpect(jsonPath("$.baseText").value("Базовый текст"));
+
+        mockMvc.perform(get("/api/tasks")
+                        .param("contentUnitId", String.valueOf(content.id()))
+                        .param("size", "100")
+                        .header("Authorization", authHeader))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(task.id()))
+                .andExpect(jsonPath("$.items[0].contentUnitId").value(content.id()));
     }
 
     @Test
